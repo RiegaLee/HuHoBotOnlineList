@@ -1,0 +1,18 @@
+name: HuHoBotOnlineList
+version: '${version}'
+main: cn.huohuas001.huhobot.onlinelist.OnlineListPlugin
+api-version: '1.16'
+load: POSTWORLD
+softdepend:
+  - HuHoBotPenguin
+commands:
+  huhobotonlinelist:
+    description: HuHoBot 在线列表附属插件内部桥接命令
+    usage: /huhobotonlinelist [test <0-300> [页码] [名称模板]]
+permissions:
+  huhobotonlinelist.admin:
+    description: 允许生成虚假玩家在线列表测试预览
+    default: op
+  huhobotonlinelist.priority:
+    description: 在在线列表中作为管理员置顶显示
+    default: op

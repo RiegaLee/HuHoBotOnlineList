@@ -1,0 +1,50 @@
+# QQ 群中注册的命令。这里不需要写前导斜杠。
+bot-command: "在线列表"
+push-command-menu: true
+
+# 图片左上角显示的服务器名称；默认不重复使用 HuHoBot 品牌名。
+server-name: "MinecraftServer"
+
+# 同一个群连续请求的最短间隔，防止多人反复触发图片生成。
+cooldown-seconds: 3
+
+messages:
+  busy: "在线列表正在生成，请稍候再试。"
+  failed: "在线列表生成或发送失败，请稍后再试。"
+  page-usage: "用法：/{command} [页码]，页码必须是正整数。"
+  page-out-of-range: "没有第 {page} 页，当前共 {pages} 页。"
+
+pagination:
+  # 三列布局推荐每页 27 人（3 列 × 9 行），单页图片为 1200×1920。
+  page-size: 27
+
+sorting:
+  # 管理员置顶；管理员组和普通玩家组内均按玩家名排序。
+  admin-first: true
+  admin-permission: "huhobotonlinelist.priority"
+
+render:
+  # 雾蓝主题默认使用三列紧凑玩家卡片。
+  columns: 3
+  font-family: ""
+  footer-text: "POWERED BY HuHoBot"
+
+test:
+  # 大于 0 时，QQ群 /在线列表 会改用指定数量的虚假玩家，可测试完整 QQ 发图链路。
+  # 正式使用时务必保持 0。允许范围：0-300。
+  fake-player-count: 0
+  # 支持 {index}、{index2}、{index3}，并允许故意超过正常 Minecraft ID 长度来测试省略效果。
+  fake-player-name-template: "TestPlayer{index3}"
+  # 虚假名单中前几名标记为管理员，便于检查置顶排序和 ADMIN 标识。
+  fake-admin-count: 3
+
+skin:
+  enabled: true
+  connect-timeout-ms: 3000
+  read-timeout-ms: 5000
+  cache-size: 200
+  download-threads: 4
+
+image-api:
+  # QQ 官方机器人图片上限高于此值；这里预留余量并提前给出清晰错误。
+  max-bytes: 20971520
