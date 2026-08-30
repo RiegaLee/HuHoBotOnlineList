@@ -1,6 +1,8 @@
 name: HuHoBotOnlineList
 version: '${version}'
 main: cn.huohuas001.huhobot.onlinelist.OnlineListPlugin
+description: 一个更漂亮的在线列表插件
+author: RiegaLee，Shabby-666
 api-version: '1.16'
 load: POSTWORLD
 softdepend:

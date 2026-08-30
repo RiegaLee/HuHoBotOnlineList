@@ -12,7 +12,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.lang.reflect.Method;
 import java.util.function.Consumer;
 
-/** 运行时注册 QQ 命令，并动态监听 HuHoBot 的 OnBotCommand。 */
+/**
+ * 后备入口：监听 HuHoBot OnBotCommand 事件，并通过新规范 API 注册扩展命令。
+ */
 public final class HuHoBotBridge {
     private static final String[] EVENT_CLASSES = {
         "cn.huohuas001.huhobotPenguin.spigot.events.OnBotCommand"
@@ -25,13 +27,9 @@ public final class HuHoBotBridge {
     private Plugin huHoBot;
     private Listener listener;
     private boolean commandRegistered;
+    private boolean newApiUsed;
 
-    public HuHoBotBridge(
-        JavaPlugin owner,
-        String commandKey,
-        boolean pushMenu,
-        Consumer<BotCommandContext> handler
-    ) {
+    public HuHoBotBridge(JavaPlugin owner, String commandKey, boolean pushMenu, Consumer<BotCommandContext> handler) {
         this.owner = owner;
         this.commandKey = commandKey;
         this.pushMenu = pushMenu;
@@ -41,36 +39,38 @@ public final class HuHoBotBridge {
     public void connect() throws ReflectiveOperationException {
         PluginManager manager = owner.getServer().getPluginManager();
         huHoBot = locatePlugin(manager);
-        if (huHoBot == null || !huHoBot.isEnabled()) {
+        if (huHoBot == null || !huHoBot.isEnabled())
             throw new IllegalStateException("未找到已启用的 HuHoBotPenguin");
-        }
 
+        // 注册事件监听
         Class<? extends Event> eventClass = findEventClass(huHoBot.getClass().getClassLoader());
         listener = new Listener() { };
         EventExecutor executor = (ignored, event) -> onEvent(event);
         manager.registerEvent(eventClass, listener, EventPriority.NORMAL, executor, owner, false);
 
-        Object registered;
-        try {
-            registered = Reflect.invoke(
-                huHoBot,
-                "registerBotCommand",
-                commandKey,
-                "huhobotonlinelist bridge",
-                0,
-                pushMenu
-            );
-        } catch (NoSuchMethodException error) {
-            registered = Reflect.invoke(huHoBot, "registerBotCommand", commandKey, "huhobotonlinelist bridge");
+        // 尝试新规范：registerAddon + registerBotCommand(addonName, ...)
+        if (tryNewApi()) {
+            commandRegistered = true;
+            newApiUsed = true;
+            return;
         }
-        commandRegistered = !(registered instanceof Boolean) || (Boolean) registered;
-        if (!commandRegistered) throw new IllegalStateException("HuHoBot 拒绝注册命令：" + commandKey);
+
+        // 回退旧规范：仅 registerBotCommand(key, ...)
+        if (tryOldApi()) {
+            commandRegistered = true;
+            newApiUsed = false;
+            return;
+        }
+
+        throw new IllegalStateException("HuHoBot 拒绝注册命令：" + commandKey);
     }
 
     public void disconnect() {
         if (huHoBot != null && commandRegistered) {
             try {
-                Reflect.invoke(huHoBot, "unregisterBotCommand", commandKey);
+                if (newApiUsed) {
+                    Reflect.invoke(huHoBot, "unregisterBotCommand", owner.getName());
+                }
             } catch (Throwable error) {
                 owner.getLogger().warning("注销 HuHoBot 命令失败：" + error.getMessage());
             }
@@ -78,19 +78,41 @@ public final class HuHoBotBridge {
         commandRegistered = false;
     }
 
-    public String readServerName() {
-        if (huHoBot == null) return null;
+    public Plugin getHuHoBotPlugin() { return huHoBot; }
+
+    private boolean tryNewApi() {
         try {
-            Object value = Reflect.invoke(huHoBot, "getServerName");
-            String name = value == null ? "" : value.toString().trim();
-            return name.isEmpty() ? null : name;
-        } catch (ReflectiveOperationException ignored) {
-            return null;
+            String addonName = owner.getName();
+            String version = owner.getDescription().getVersion();
+            String description = owner.getDescription().getDescription();
+            if (description == null) description = "";
+            String author = owner.getDescription().getAuthors().isEmpty()
+                ? "" : owner.getDescription().getAuthors().get(0);
+
+            // registerAddon(name, version, description, author)
+            Reflect.invoke(huHoBot, "registerAddon", addonName, version, description, author);
+
+            // registerBotCommand(addonName, key, command, permission, pushMenu)
+            Object result = Reflect.invoke(huHoBot, "registerBotCommand",
+                addonName, commandKey, "查看服务器在线列表", 0, pushMenu);
+            return result instanceof Boolean && (Boolean) result;
+        } catch (NoSuchMethodException e) {
+            return false;
+        } catch (Throwable e) {
+            return false;
         }
     }
 
-    public Plugin getHuHoBotPlugin() {
-        return huHoBot;
+    private boolean tryOldApi() {
+        try {
+            Object result = Reflect.invoke(huHoBot, "registerBotCommand",
+                commandKey, "查看服务器在线列表", 0, pushMenu);
+            return result instanceof Boolean && (Boolean) result;
+        } catch (NoSuchMethodException e) {
+            return false;
+        } catch (Throwable e) {
+            return false;
+        }
     }
 
     private void onEvent(Event event) {
@@ -108,15 +130,7 @@ public final class HuHoBotBridge {
         Plugin named = manager.getPlugin("HuHoBotPenguin");
         if (named != null) return named;
         for (Plugin plugin : manager.getPlugins()) {
-            Method method = Reflect.findCompatibleMethod(
-                plugin.getClass(),
-                "registerBotCommand",
-                "key",
-                "command",
-                0,
-                true
-            );
-            if (method != null) return plugin;
+            if (plugin.getClass().getName().contains("HuHoBot")) return plugin;
         }
         return null;
     }
@@ -128,9 +142,7 @@ public final class HuHoBotBridge {
             try {
                 Class<?> type = Class.forName(name, false, loader);
                 if (Event.class.isAssignableFrom(type)) return (Class<? extends Event>) type;
-            } catch (ClassNotFoundException error) {
-                last = error;
-            }
+            } catch (ClassNotFoundException error) { last = error; }
         }
         throw last == null ? new ClassNotFoundException("HuHoBot OnBotCommand") : last;
     }

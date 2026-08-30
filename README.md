@@ -20,15 +20,17 @@ HuHoBotOnlineList 是 HuHoBotPenguin 的 Spigot/Paper 附属插件。QQ群用户
 
 - Spigot 或 Paper 1.16.5 及以上
 - Java 8 及以上
-- HuHoBotPenguin Spigot 适配器
+- HuHoBotPenguin Spigot 适配器 v1.5.0+
 
 当前构建目标为 Java 8 字节码。已实测环境：
 
 - Paper 1.21.11
 - Java 21
-- HuHoBotPenguin 1.2.2
+- HuHoBotPenguin 1.2.2+
 
-插件依赖 HuHoBotPenguin 提供 QQ 机器人连接。`plugin.yml` 使用 `softdepend` 保证常见安装环境中的加载顺序，同时允许插件在不同 HuHoBot 分支上尝试兼容入口。
+插件依赖 HuHoBotPenguin 提供 QQ 机器人连接和扩展注册 API。`plugin.yml` 使用 `softdepend` 保证常见安装环境中的加载顺序，同时允许插件在不同 HuHoBot 分支上尝试兼容入口。
+
+v1.0.0 起使用 HuHoBotPenguin v1.5.0+ 的扩展 API（`registerAddon` + `registerBotCommand`），命令会自动出现在 `/帮助` 和 `/addons` 中。
 
 ## 下载
 
@@ -112,7 +114,7 @@ server-name: "MinecraftServer"
 cooldown-seconds: 3
 ```
 
-保持 `bot-command: "在线列表"` 时，插件会优先使用 HuHoBot 原生 `BaseCommand` 入口。自定义命令名称会使用 `registerBotCommand` 与 `OnBotCommand` 兼容入口。
+保持 `bot-command: "在线列表"` 时，插件会优先使用 HuHoBot 原生 `BaseCommand` 入口。自定义命令名称会使用扩展 API（`registerAddon` + `registerBotCommand`）与 `OnBotCommand` 事件兼容入口。
 
 原生命令是否显示在 QQ 指令面板中由宿主 HuHoBot 的指令面板配置决定；`push-command-menu` 主要用于兼容入口。
 
@@ -250,7 +252,8 @@ HuHoBot 附属插件开发入口可参考：[Spigot 附属插件开发教程](ht
 插件按以下顺序尝试接入 HuHoBot：
 
 1. 使用 HuHoBot 原生 `BaseCommand` 注册 `/在线列表`。
-2. 原生入口不可用时，使用 `registerBotCommand`、`unregisterBotCommand` 与 Bukkit `OnBotCommand` 事件。
+2. 原生入口不可用时，使用扩展 API（`registerAddon` + `registerBotCommand`）注册命令，命令会自动出现在 `/帮助` 和 `/addons` 中。
+3. 同时注册 `OnBotCommand` 事件监听，处理自定义逻辑（如图片生成）。
 
 图片回复按以下顺序尝试：
 
@@ -314,7 +317,7 @@ Linux 或 macOS：
 构建完成后，插件 JAR 位于：
 
 ```text
-build/libs/HuHoBotOnlineList-0.1.0.jar
+build/libs/HuHoBotOnlineList-1.0.0.jar
 ```
 ## 许可证
 
