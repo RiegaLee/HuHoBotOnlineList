@@ -34,6 +34,7 @@ HuHoBotOnlineList 是 HuHoBotPenguin 的 Spigot/Paper 附属插件。QQ群用户
 
 请从当前项目的 Release 页面下载 `HuHoBotOnlineList-x.y.z.jar`。也可以按照下方“构建”章节自行编译。
 
+[下载最新版本](https://github.com/RiegaLee/HuHoBotOnlineList/releases/latest)
 ## 安装
 
 1. 安装并正确配置 HuHoBotPenguin Spigot 适配器。
@@ -315,6 +316,9 @@ Linux 或 macOS：
 ```text
 build/libs/HuHoBotOnlineList-0.1.0.jar
 ```
+## 许可证
+
+本项目基于 [GNU Affero General Public License v3.0](LICENSE) 发布。
 
 构建脚本会强制以 UTF-8 处理 `plugin.yml`，并将编译期 HuHoBot ABI 桩排除在最终 JAR 外。
 
