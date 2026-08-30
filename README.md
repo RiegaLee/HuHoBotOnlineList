@@ -247,7 +247,7 @@ test:
 
 ## HuHoBot 多分支适配
 
-HuHoBot 附属插件开发入口可参考：[Spigot 附属插件开发教程](https://huhobot.txssb.cn/Develop/Spigot/)。
+HuHoBot 附属插件开发入口可参考：[Spigot 附属插件开发教程](https://huhobot.txssb.cn/develop/spigot/)。
 
 插件按以下顺序尝试接入 HuHoBot：
 
