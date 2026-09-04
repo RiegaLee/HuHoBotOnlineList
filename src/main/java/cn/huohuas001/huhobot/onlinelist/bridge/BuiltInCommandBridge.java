@@ -1,28 +1,30 @@
 package cn.huohuas001.huhobot.onlinelist.bridge;
 
 import cn.huohuas001.huhobot.onlinelist.util.Reflect;
-import org.bukkit.event.Event;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.plugin.EventExecutor;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.List;
 import java.util.function.Consumer;
 
-/**
- * 通过监听 OnBotCommand 事件接收命令，并使用新规范 API（registerAddon + registerBotCommand）注册。
- * 不再使用 BaseCommand 子类，避免命令同时出现在内置和扩展分类中。
- */
+/** 将附属 JAR 中的 BaseCommand 处理器注册到当前 HuHoBot QClient。 */
 public final class BuiltInCommandBridge {
-    public enum ConnectResult { CONNECTED, NOT_READY, UNSUPPORTED }
+    public enum ConnectResult {
+        CONNECTED,
+        NOT_READY,
+        UNSUPPORTED
+    }
 
     private final JavaPlugin owner;
     private final Consumer<BotCommandContext> handler;
     private final Plugin huHoBot;
-    private Listener listener;
-    private boolean commandRegistered;
+    private Object commandInstance;
+    private Class<?> qClientClass;
+    private boolean addonApiUsed;
 
     public BuiltInCommandBridge(JavaPlugin owner, Consumer<BotCommandContext> handler) {
         this.owner = owner;
@@ -31,91 +33,98 @@ public final class BuiltInCommandBridge {
     }
 
     public ConnectResult tryConnect() {
-        if (commandRegistered) return ConnectResult.CONNECTED;
+        if (commandInstance != null) return ConnectResult.CONNECTED;
         if (huHoBot == null || !huHoBot.isEnabled()) return ConnectResult.UNSUPPORTED;
-
         try {
-            // 注册事件监听
-            Class<? extends Event> eventClass = findEventClass(huHoBot.getClass().getClassLoader());
-            listener = new Listener() { };
-            EventExecutor executor = (ignored, event) -> onEvent(event);
-            owner.getServer().getPluginManager().registerEvent(
-                eventClass, listener, EventPriority.NORMAL, executor, owner, false);
-
-            // 注册扩展 + 命令
-            String addonName = owner.getName();
-            String version = owner.getDescription().getVersion();
-            String description = owner.getDescription().getDescription();
-            if (description == null) description = "";
-            String author = owner.getDescription().getAuthors().isEmpty()
-                ? "" : owner.getDescription().getAuthors().get(0);
-
-            Reflect.invoke(huHoBot, "registerAddon", addonName, version, description, author);
-
-            String commandKey = owner.getConfig().getString("bot-command", "在线列表");
-            if (commandKey == null || commandKey.trim().isEmpty()) commandKey = "在线列表";
-            boolean pushMenu = owner.getConfig().getBoolean("push-command-menu", true);
-
-            Object result = Reflect.invoke(huHoBot, "registerBotCommand",
-                addonName, commandKey, "查看服务器在线列表", 0, pushMenu);
-
-            if (result instanceof Boolean && (Boolean) result) {
-                commandRegistered = true;
-                return ConnectResult.CONNECTED;
+            ClassLoader loader = huHoBot.getClass().getClassLoader();
+            qClientClass = Class.forName("cn.huohuas001.bot.QClient", false, loader);
+            Object qClient = Reflect.kotlinObject(qClientClass);
+            Object candidate = new BuiltInOnlineListCommand(this::onRawEvent);
+            addonApiUsed = AddonCommandRegistrar.tryRegister(
+                loader,
+                qClient,
+                candidate,
+                owner.getName(),
+                owner.getDescription().getVersion(),
+                owner.getDescription().getDescription() == null ? "" : owner.getDescription().getDescription(),
+                String.join(", ", owner.getDescription().getAuthors())
+            );
+            if (addonApiUsed) {
+                // PenguinAgent 的 Addon 重载不会主动刷新已经启动的 QQ 指令面板。
+                try {
+                    Reflect.invoke(qClient, "syncGroupPanels");
+                } catch (Throwable error) {
+                    owner.getLogger().fine("HuHoBot Addon 指令面板刷新失败：" + concise(error));
+                }
+            } else {
+                Reflect.invoke(qClient, "registerCommand", candidate);
             }
-            return ConnectResult.UNSUPPORTED;
+            commandInstance = candidate;
+            return ConnectResult.CONNECTED;
         } catch (Throwable error) {
             if (isNotReady(error)) return ConnectResult.NOT_READY;
-            owner.getLogger().fine("HuHoBot 命令注册失败：" + concise(error));
+            owner.getLogger().fine("HuHoBot 原生命令入口不可用：" + concise(error));
             return ConnectResult.UNSUPPORTED;
         }
     }
 
     public void disconnect() {
-        // 注销事件监听（无论 commandRegistered 状态）
-        if (listener != null) {
-            try {
-                for (org.bukkit.event.HandlerList list : org.bukkit.event.HandlerList.getHandlerLists()) {
-                    list.unregister(listener);
-                }
-            } catch (Throwable ignored) {
-            }
-            listener = null;
-        }
-        // 注销命令
-        if (commandRegistered) {
-            try {
-                String commandKey = owner.getConfig().getString("bot-command", "在线列表");
-                if (commandKey != null) {
-                    Reflect.invoke(huHoBot, "unregisterBotCommand", commandKey);
-                }
-            } catch (Throwable ignored) {
-            }
-            commandRegistered = false;
+        if (qClientClass == null || commandInstance == null) return;
+        try {
+            Object handlerObject = readKotlinField(qClientClass, "groupMessageHandler");
+            Object commands = Reflect.read(handlerObject, "commands");
+            if (commands instanceof List) ((List<?>) commands).remove(commandInstance);
+            Object qClient = Reflect.kotlinObject(qClientClass);
+            Reflect.invoke(qClient, "syncGroupPanels");
+        } catch (Throwable error) {
+            owner.getLogger().warning("注销 HuHoBot 原生命令失败：" + concise(error));
+        } finally {
+            commandInstance = null;
+            addonApiUsed = false;
         }
     }
 
-    public Plugin getHuHoBotPlugin() { return huHoBot; }
+    public boolean isAddonApiUsed() {
+        return addonApiUsed;
+    }
 
-    private void onEvent(Event event) {
+    public Plugin getHuHoBotPlugin() {
+        return huHoBot;
+    }
+
+    public String readServerName() {
+        if (huHoBot == null) return null;
         try {
-            BotCommandContext context = BotCommandContext.from(event);
-            String commandKey = owner.getConfig().getString("bot-command", "在线列表");
-            if (commandKey == null) commandKey = "在线列表";
-            if (!commandKey.equals(context.getCommandKey())) return;
-            context.cancel();
-            handler.accept(context);
-        } catch (Throwable error) {
-            owner.getLogger().warning("处理 HuHoBot 命令事件失败：" + error.getMessage());
+            Object value = Reflect.invoke(huHoBot, "getServerName");
+            String text = value == null ? "" : value.toString().trim();
+            return text.isEmpty() ? null : text;
+        } catch (Throwable ignored) {
+            return null;
         }
+    }
+
+    private void onRawEvent(Object event) {
+        try {
+            handler.accept(BotCommandContext.fromRawEvent(event));
+        } catch (Throwable error) {
+            owner.getLogger().warning("读取 HuHoBot 原生群消息失败：" + concise(error));
+        }
+    }
+
+    private static Object readKotlinField(Class<?> type, String name) throws ReflectiveOperationException {
+        Field field = Reflect.findField(type, name);
+        if (field == null) throw new NoSuchFieldException(type.getName() + "." + name);
+        field.setAccessible(true);
+        return field.get(Modifier.isStatic(field.getModifiers()) ? null : Reflect.kotlinObject(type));
     }
 
     private static boolean isNotReady(Throwable error) {
         Throwable cursor = error;
         while (cursor != null) {
             String message = cursor.getMessage();
-            if (message != null && (message.contains("not been launched") || message.contains("not initialized")))
+            if (message != null && (message.contains("not been launched") || message.contains("not initialized"))) {
                 return true;
+            }
             cursor = cursor.getCause();
         }
         return false;
@@ -126,23 +135,10 @@ public final class BuiltInCommandBridge {
         if (named != null) return named;
         for (Plugin plugin : manager.getPlugins()) {
             if (plugin.getClass().getName().contains("HuHoBot")) return plugin;
+            Method method = Reflect.findCompatibleMethod(plugin.getClass(), "registerBotCommand", "a", "b");
+            if (method != null) return plugin;
         }
         return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Class<? extends Event> findEventClass(ClassLoader loader) throws ClassNotFoundException {
-        String[] eventClasses = {
-            "cn.huohuas001.huhobotPenguin.spigot.events.OnBotCommand"
-        };
-        ClassNotFoundException last = null;
-        for (String name : eventClasses) {
-            try {
-                Class<?> type = Class.forName(name, false, loader);
-                if (Event.class.isAssignableFrom(type)) return (Class<? extends Event>) type;
-            } catch (ClassNotFoundException error) { last = error; }
-        }
-        throw last == null ? new ClassNotFoundException("HuHoBot OnBotCommand") : last;
     }
 
     private static String concise(Throwable error) {

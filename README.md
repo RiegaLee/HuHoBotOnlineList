@@ -9,7 +9,7 @@ HuHoBotOnlineList 是 HuHoBotPenguin 的 Spigot/Paper 附属插件。QQ群用户
 - 使用 `/在线列表 [页码]` 查询当前服务器在线玩家。
 - 默认每页 27 人，采用 3 列 × 9 行布局。
 - 管理员优先显示，管理员组与普通玩家组内分别按名称排序。
-- 读取玩家当前 Minecraft 皮肤并显示头像；失败时自动使用占位头像。
+- 读取玩家当前 Minecraft 皮肤并显示头像；支持 SkinsRestorer v15+，最终失败时使用 JAR 内置 Steve 头像。
 - 根据人数自动拼接可延伸的三段式底图。
 - 图片底部显示 `第 X / Y 页`。
 - 图片消息只附带一个不可见空格，不额外发送人数说明文字。
@@ -20,23 +20,20 @@ HuHoBotOnlineList 是 HuHoBotPenguin 的 Spigot/Paper 附属插件。QQ群用户
 
 - Spigot 或 Paper 1.16.5 及以上
 - Java 8 及以上
-- HuHoBotPenguin Spigot 适配器 v1.5.0+
+- HuHoBotPenguin Spigot 适配器
 
 当前构建目标为 Java 8 字节码。已实测环境：
 
 - Paper 1.21.11
 - Java 21
-- HuHoBotPenguin 1.2.2+
+- HuHoBotPenguin 1.2.2
 
-插件依赖 HuHoBotPenguin 提供 QQ 机器人连接和扩展注册 API。`plugin.yml` 使用 `softdepend` 保证常见安装环境中的加载顺序，同时允许插件在不同 HuHoBot 分支上尝试兼容入口。
-
-v1.0.0 起使用 HuHoBotPenguin v1.5.0+ 的扩展 API（`registerAddon` + `registerBotCommand`），命令会自动出现在 `/帮助` 和 `/addons` 中。
+插件依赖 HuHoBotPenguin 提供 QQ 机器人连接。原版 HuHoBot/PenguinClient 继续使用既有原生命令入口；PenguinAgent v1.5.0 及以上版本会额外启用 AddonAPI。`plugin.yml` 使用 `softdepend` 保证常见安装环境中的加载顺序，同时允许插件在不同 HuHoBot 分支上尝试兼容入口。
 
 ## 下载
 
 请从当前项目的 Release 页面下载 `HuHoBotOnlineList-x.y.z.jar`。也可以按照下方“构建”章节自行编译。
 
-[下载最新版本](https://github.com/RiegaLee/HuHoBotOnlineList/releases/latest)
 ## 安装
 
 1. 安装并正确配置 HuHoBotPenguin Spigot 适配器。
@@ -114,9 +111,9 @@ server-name: "MinecraftServer"
 cooldown-seconds: 3
 ```
 
-保持 `bot-command: "在线列表"` 时，插件会优先使用 HuHoBot 原生 `BaseCommand` 入口。自定义命令名称会使用扩展 API（`registerAddon` + `registerBotCommand`）与 `OnBotCommand` 事件兼容入口。
+保持 `bot-command: "在线列表"` 时，PenguinAgent v1.5.0+ 会通过带 `Addon` 元数据的原生 `BaseCommand` 入口注册；原版 HuHoBot/PenguinClient 会自动回退到既有 `BaseCommand` 入口。自定义命令名称仍使用 `registerBotCommand` 与 `OnBotCommand` 兼容入口。
 
-原生命令是否显示在 QQ 指令面板中由宿主 HuHoBot 的指令面板配置决定；`push-command-menu` 主要用于兼容入口。
+使用 PenguinAgent AddonAPI 时，插件和命令会出现在 `/帮助` 与 `/addons` 中；是否同步到 QQ 指令面板仍由宿主配置决定。`push-command-menu` 主要用于自定义命令名称的兼容入口。
 
 ### 分页与排序
 
@@ -155,13 +152,20 @@ render:
 ```yaml
 skin:
   enabled: true
+  debug: false
+  fallback-avatar: "steve"
   connect-timeout-ms: 3000
   read-timeout-ms: 5000
   cache-size: 200
   download-threads: 4
+  skins-restorer:
+    enabled: true
+    allow-lookup: true
 ```
 
-皮肤地址从玩家当前 `PlayerProfile` 或 `GameProfile` 获取。下载失败、离线模式没有皮肤或服务器无法访问皮肤地址时，图片仍会正常生成，只是改用占位头像。
+插件先从玩家当前 `PlayerProfile` 或 `GameProfile` 获取皮肤，并兼容 Paper 1.21.11 的新版 Authlib 访问器。当前皮肤缺失或下载失败时，会在皮肤下载线程中读取 SkinsRestorer v15+ 已存储或登录时将应用的皮肤；成功头像会按玩家 UUID 保留在有界内存缓存中。所有入口都失败时使用 JAR 内置 Steve 头像，不依赖外网。
+
+`debug` 开启后，控制台会记录头像来自 Bukkit、SkinsRestorer、最后成功缓存还是 Steve 兜底。诊断完成后建议关闭，避免正常请求产生较多日志。`fallback-avatar` 也可设为 `initial`，恢复旧版彩色首字母头像。
 
 ### 图片发送限制
 
@@ -251,9 +255,11 @@ HuHoBot 附属插件开发入口可参考：[Spigot 附属插件开发教程](ht
 
 插件按以下顺序尝试接入 HuHoBot：
 
-1. 使用 HuHoBot 原生 `BaseCommand` 注册 `/在线列表`。
-2. 原生入口不可用时，使用扩展 API（`registerAddon` + `registerBotCommand`）注册命令，命令会自动出现在 `/帮助` 和 `/addons` 中。
-3. 同时注册 `OnBotCommand` 事件监听，处理自定义逻辑（如图片生成）。
+1. 在 PenguinAgent v1.5.0+ 中使用 `QClient.registerCommand(Addon, BaseCommand)` 注册 `/在线列表`，同时登记附属元数据。
+2. 在原版 HuHoBot/PenguinClient 中使用既有的 `QClient.registerCommand(BaseCommand)`。
+3. 自定义 `bot-command` 时，使用 `registerBotCommand`、`unregisterBotCommand` 与 Bukkit `OnBotCommand` 事件。
+
+AddonAPI 通过运行时反射接入，不会把 PenguinAgent 或其 `Addon` 类打进插件 JAR，因此同一份产物仍可用于上述两类宿主。
 
 图片回复按以下顺序尝试：
 
@@ -317,11 +323,8 @@ Linux 或 macOS：
 构建完成后，插件 JAR 位于：
 
 ```text
-build/libs/HuHoBotOnlineList-1.0.0.jar
+build/libs/HuHoBotOnlineList-1.0.1.jar
 ```
-## 许可证
-
-本项目基于 [GNU Affero General Public License v3.0](LICENSE) 发布。
 
 构建脚本会强制以 UTF-8 处理 `plugin.yml`，并将编译期 HuHoBot ABI 桩排除在最终 JAR 外。
 

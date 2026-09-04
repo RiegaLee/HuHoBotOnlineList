@@ -40,10 +40,18 @@ test:
 
 skin:
   enabled: true
+  # 开启后会在控制台记录头像来自 Bukkit、SkinsRestorer、历史缓存还是 Steve 兜底。
+  debug: false
+  # steve：使用 JAR 内置的 Steve 正脸；initial：使用旧版彩色首字母头像。
+  fallback-avatar: "steve"
   connect-timeout-ms: 3000
   read-timeout-ms: 5000
   cache-size: 200
   download-threads: 4
+  skins-restorer:
+    enabled: true
+    # 已绑定皮肤不存在时，允许异步查询 SkinsRestorer 将在玩家登录时应用的皮肤。
+    allow-lookup: true
 
 image-api:
   # QQ 官方机器人图片上限高于此值；这里预留余量并提前给出清晰错误。

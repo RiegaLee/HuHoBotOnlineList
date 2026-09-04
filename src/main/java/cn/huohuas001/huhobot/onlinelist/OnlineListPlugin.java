@@ -13,6 +13,8 @@ import cn.huohuas001.huhobot.onlinelist.model.ServerSnapshot;
 import cn.huohuas001.huhobot.onlinelist.render.OnlineListRenderer;
 import cn.huohuas001.huhobot.onlinelist.skin.AvatarCache;
 import cn.huohuas001.huhobot.onlinelist.skin.BukkitSkinResolver;
+import cn.huohuas001.huhobot.onlinelist.skin.SkinRestorerSkinResolver;
+import cn.huohuas001.huhobot.onlinelist.skin.SkinUrlResolver;
 import cn.huohuas001.huhobot.onlinelist.testing.FakePlayerFactory;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
@@ -39,7 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
 public final class OnlineListPlugin extends JavaPlugin implements CommandExecutor {
-    private final BukkitSkinResolver skinResolver = new BukkitSkinResolver();
+    private BukkitSkinResolver skinResolver;
     private final Set<String> inFlightGroups = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, Long> lastRequestAt = new ConcurrentHashMap<String, Long>();
     private ExecutorService renderExecutor;
@@ -75,19 +77,25 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
             if (huHoBot == null || !huHoBot.isEnabled()) {
                 throw new IllegalStateException("未找到已启用的 HuHoBotPenguin");
             }
+            boolean skinDebug = getConfig().getBoolean("skin.debug", false);
+            skinResolver = new BukkitSkinResolver(getLogger(), skinDebug);
+            SkinUrlResolver fallbackSkinResolver = connectSkinRestorer(skinDebug);
             AvatarCache avatars = new AvatarCache(
                 getLogger(),
                 skinExecutor,
                 getConfig().getInt("skin.connect-timeout-ms", 3000),
                 getConfig().getInt("skin.read-timeout-ms", 5000),
                 getConfig().getInt("skin.cache-size", 200),
-                getConfig().getBoolean("skin.enabled", true)
+                getConfig().getBoolean("skin.enabled", true),
+                fallbackSkinResolver,
+                skinDebug
             );
             renderer = new OnlineListRenderer(
                 avatars,
                 getConfig().getInt("render.columns", 3),
                 getConfig().getString("render.font-family", ""),
-                getConfig().getString("render.footer-text", "POWERED BY HuHoBot")
+                getConfig().getString("render.footer-text", "POWERED BY HuHoBot"),
+                getConfig().getString("skin.fallback-avatar", "steve")
             );
             imageReplyApi = new ReflectiveImageReplyApi(
                 huHoBot,
@@ -103,6 +111,29 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
         }
 
         getLogger().info("在线列表已就绪，主题：雾蓝玻璃，图片回复：JAR 内置字节 API");
+    }
+
+    private SkinUrlResolver connectSkinRestorer(boolean debug) {
+        if (!getConfig().getBoolean("skin.skins-restorer.enabled", true)) return null;
+        Plugin plugin = getServer().getPluginManager().getPlugin("SkinsRestorer");
+        if (plugin == null || !plugin.isEnabled()) {
+            if (debug) getLogger().info("[头像诊断] 未检测到已启用的 SkinsRestorer，跳过其皮肤入口");
+            return null;
+        }
+        try {
+            SkinRestorerSkinResolver resolver = SkinRestorerSkinResolver.connect(
+                plugin,
+                getConfig().getBoolean("skin.skins-restorer.allow-lookup", true),
+                getLogger(),
+                debug
+            );
+            getLogger().info("已接入 SkinsRestorer 皮肤后备入口");
+            return resolver;
+        } catch (Throwable error) {
+            getLogger().warning("SkinsRestorer API 接入失败，将继续使用 Bukkit Profile 与 Steve 兜底："
+                + concise(error));
+            return null;
+        }
     }
 
     @Override
@@ -121,14 +152,18 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
         if ("在线列表".equals(commandKey)) {
             BuiltInCommandBridge.ConnectResult result = builtInBridge.tryConnect();
             if (result == BuiltInCommandBridge.ConnectResult.CONNECTED) {
-                getLogger().info("已通过 HuHoBot 原生命令入口注册 /在线列表");
+                getLogger().info(builtInBridge.isAddonApiUsed()
+                    ? "已通过 PenguinAgent AddonAPI 注册 /在线列表"
+                    : "已通过 HuHoBot 原生命令入口注册 /在线列表");
                 return;
             }
             if (result == BuiltInCommandBridge.ConnectResult.NOT_READY) {
                 registrationRetryTask = getServer().getScheduler().runTaskTimer(this, () -> {
                     BuiltInCommandBridge.ConnectResult retry = builtInBridge.tryConnect();
                     if (retry == BuiltInCommandBridge.ConnectResult.CONNECTED) {
-                        getLogger().info("QQ 客户端启动完成，已注册 /在线列表");
+                        getLogger().info(builtInBridge.isAddonApiUsed()
+                            ? "QQ 客户端启动完成，已通过 PenguinAgent AddonAPI 注册 /在线列表"
+                            : "QQ 客户端启动完成，已通过 HuHoBot 原生命令入口注册 /在线列表");
                         registrationRetryTask.cancel();
                         registrationRetryTask = null;
                     } else if (retry == BuiltInCommandBridge.ConnectResult.UNSUPPORTED) {
@@ -416,5 +451,11 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
 
     private static void shutdown(ExecutorService executor) {
         if (executor != null) executor.shutdownNow();
+    }
+
+    private static String concise(Throwable error) {
+        Throwable cursor = error;
+        while (cursor.getCause() != null && cursor.getCause() != cursor) cursor = cursor.getCause();
+        return cursor.getClass().getSimpleName() + (cursor.getMessage() == null ? "" : ": " + cursor.getMessage());
     }
 }
