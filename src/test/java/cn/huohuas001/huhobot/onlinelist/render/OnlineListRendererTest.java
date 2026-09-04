@@ -71,6 +71,40 @@ class OnlineListRendererTest {
         assertEquals(1920, lastPageImage.getHeight());
     }
 
+    @Test
+    void bundledSteveFallbackIsOpaqueAndRecognizable() {
+        BufferedImage steve = OnlineListRenderer.createDefaultSteveHead();
+
+        assertEquals(8, steve.getWidth());
+        assertEquals(8, steve.getHeight());
+        assertEquals(0xFF523D89, steve.getRGB(2, 4));
+        assertEquals(0xFFFFFFFF, steve.getRGB(1, 4));
+        assertEquals(0xFF332411, steve.getRGB(0, 0));
+    }
+
+    @Test
+    void rendersSteveFallbackPreviewForPlayerWithoutSkin() throws Exception {
+        List<PlayerSnapshot> players = new ArrayList<PlayerSnapshot>();
+        players.add(new PlayerSnapshot(
+            "NoSkinPlayer",
+            "00000000-0000-0000-0000-000000000001",
+            null
+        ));
+        ServerSnapshot snapshot = new ServerSnapshot(
+            "Steve Fallback Test",
+            20,
+            players,
+            Instant.parse("2026-09-04T04:00:00Z")
+        );
+
+        byte[] png = renderer().render(snapshot);
+        Path output = Paths.get("build", "preview", "steve-fallback-preview.png");
+        Files.createDirectories(output.getParent());
+        Files.write(output, png);
+
+        assertTrue(Files.size(output) > 50_000);
+    }
+
     private static OnlineListRenderer renderer() throws Exception {
         AvatarCache avatars = new AvatarCache(
             Logger.getLogger("test"),

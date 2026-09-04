@@ -24,6 +24,7 @@ public final class BuiltInCommandBridge {
     private final Plugin huHoBot;
     private Object commandInstance;
     private Class<?> qClientClass;
+    private boolean addonApiUsed;
 
     public BuiltInCommandBridge(JavaPlugin owner, Consumer<BotCommandContext> handler) {
         this.owner = owner;
@@ -39,7 +40,25 @@ public final class BuiltInCommandBridge {
             qClientClass = Class.forName("cn.huohuas001.bot.QClient", false, loader);
             Object qClient = Reflect.kotlinObject(qClientClass);
             Object candidate = new BuiltInOnlineListCommand(this::onRawEvent);
-            Reflect.invoke(qClient, "registerCommand", candidate);
+            addonApiUsed = AddonCommandRegistrar.tryRegister(
+                loader,
+                qClient,
+                candidate,
+                owner.getName(),
+                owner.getDescription().getVersion(),
+                owner.getDescription().getDescription() == null ? "" : owner.getDescription().getDescription(),
+                String.join(", ", owner.getDescription().getAuthors())
+            );
+            if (addonApiUsed) {
+                // PenguinAgent 的 Addon 重载不会主动刷新已经启动的 QQ 指令面板。
+                try {
+                    Reflect.invoke(qClient, "syncGroupPanels");
+                } catch (Throwable error) {
+                    owner.getLogger().fine("HuHoBot Addon 指令面板刷新失败：" + concise(error));
+                }
+            } else {
+                Reflect.invoke(qClient, "registerCommand", candidate);
+            }
             commandInstance = candidate;
             return ConnectResult.CONNECTED;
         } catch (Throwable error) {
@@ -61,7 +80,12 @@ public final class BuiltInCommandBridge {
             owner.getLogger().warning("注销 HuHoBot 原生命令失败：" + concise(error));
         } finally {
             commandInstance = null;
+            addonApiUsed = false;
         }
+    }
+
+    public boolean isAddonApiUsed() {
+        return addonApiUsed;
     }
 
     public Plugin getHuHoBotPlugin() {

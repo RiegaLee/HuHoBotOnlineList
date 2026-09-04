@@ -41,6 +41,17 @@ public final class OnlineListRenderer {
     private static final Color CARD_SHADOW = new Color(18, 65, 98, 35);
     private static final Color CYAN = new Color(57, 218, 236);
     private static final Color ADMIN_TEXT = new Color(15, 139, 166, 220);
+    private static final int[][] DEFAULT_STEVE_FACE = {
+        {0xFF332411, 0xFF332411, 0xFF3F2A15, 0xFF3F2A15, 0xFF3F2A15, 0xFF3F2A15, 0xFF332411, 0xFF2B1E0D},
+        {0xFF241808, 0xFF332411, 0xFF332411, 0xFF3F2A15, 0xFF3F2A15, 0xFF332411, 0xFF3F2A15, 0xFF332411},
+        {0xFF2B1E0D, 0xFF9B6349, 0xFFB3795E, 0xFFB7836B, 0xFFB3795E, 0xFFAA7259, 0xFF9B6349, 0xFF342512},
+        {0xFF9B6349, 0xFFAA7259, 0xFFB3795E, 0xFFB3795E, 0xFFAA7259, 0xFFAA7259, 0xFFAA7259, 0xFF9B6349},
+        {0xFFAA7259, 0xFFFFFFFF, 0xFF523D89, 0xFFAA7259, 0xFF9B6349, 0xFF523D89, 0xFFFFFFFF, 0xFFAA7259},
+        {0xFF9B6349, 0xFFAA7259, 0xFFAA7259, 0xFF6A4030, 0xFF6A4030, 0xFFAA7259, 0xFFAA7259, 0xFF9B6349},
+        {0xFF90593F, 0xFF8F5E3E, 0xFF492510, 0xFF774235, 0xFF774235, 0xFF421D0A, 0xFF8F5E3E, 0xFF815339},
+        {0xFF94603E, 0xFF815339, 0xFF421D0A, 0xFF492510, 0xFF421D0A, 0xFF492510, 0xFF815339, 0xFF8F5E3E}
+    };
+    private static final BufferedImage DEFAULT_STEVE_HEAD = createDefaultSteveHead();
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm")
         .withZone(ZoneId.of("Asia/Shanghai"));
@@ -58,8 +69,19 @@ public final class OnlineListRenderer {
     private final int contentBottomSafe;
     private final String fontFamily;
     private final String footerText;
+    private final boolean useInitialFallback;
 
     public OnlineListRenderer(AvatarCache avatarCache, int columns, String configuredFont, String footerText) throws IOException {
+        this(avatarCache, columns, configuredFont, footerText, "steve");
+    }
+
+    public OnlineListRenderer(
+        AvatarCache avatarCache,
+        int columns,
+        String configuredFont,
+        String footerText,
+        String fallbackAvatar
+    ) throws IOException {
         this(
             readResource("/online/huhobot-glass-header-1200x384.png"),
             readResource("/online/huhobot-glass-body-tile-1200x640.png"),
@@ -67,7 +89,8 @@ public final class OnlineListRenderer {
             avatarCache,
             columns,
             configuredFont,
-            footerText
+            footerText,
+            fallbackAvatar
         );
     }
 
@@ -79,6 +102,19 @@ public final class OnlineListRenderer {
         int columns,
         String configuredFont,
         String footerText
+    ) {
+        this(header, bodyTile, footer, avatarCache, columns, configuredFont, footerText, "steve");
+    }
+
+    OnlineListRenderer(
+        BufferedImage header,
+        BufferedImage bodyTile,
+        BufferedImage footer,
+        AvatarCache avatarCache,
+        int columns,
+        String configuredFont,
+        String footerText,
+        String fallbackAvatar
     ) {
         validateSlice(header, WIDTH, HEADER_HEIGHT, "header");
         validateSlice(bodyTile, WIDTH, BODY_TILE_HEIGHT, "body tile");
@@ -97,6 +133,7 @@ public final class OnlineListRenderer {
         this.contentBottomSafe = compact ? 60 : 86;
         this.fontFamily = chooseFont(configuredFont);
         this.footerText = footerText == null ? "" : footerText.trim();
+        this.useInitialFallback = "initial".equalsIgnoreCase(fallbackAvatar == null ? "" : fallbackAvatar.trim());
     }
 
     public byte[] render(ServerSnapshot snapshot) throws IOException {
@@ -232,6 +269,11 @@ public final class OnlineListRenderer {
     }
 
     private void drawFallbackAvatar(Graphics2D graphics, int x, int y, PlayerSnapshot player) {
+        if (!useInitialFallback) {
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            graphics.drawImage(DEFAULT_STEVE_HEAD, x, y, x + avatarSize, y + avatarSize, 0, 0, 8, 8, null);
+            return;
+        }
         int hue = Math.abs(player.getUuid().hashCode()) % 360;
         Color base = Color.getHSBColor(hue / 360f, 0.22f, 0.86f);
         graphics.setColor(base);
@@ -241,6 +283,16 @@ public final class OnlineListRenderer {
         String initial = player.getName().isEmpty() ? "?" : player.getName().substring(0, 1).toUpperCase();
         FontMetrics metrics = graphics.getFontMetrics();
         graphics.drawString(initial, x + (avatarSize - metrics.stringWidth(initial)) / 2, y + (columns == 3 ? 40 : 50));
+    }
+
+    static BufferedImage createDefaultSteveHead() {
+        BufferedImage image = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < DEFAULT_STEVE_FACE.length; y++) {
+            for (int x = 0; x < DEFAULT_STEVE_FACE[y].length; x++) {
+                image.setRGB(x, y, DEFAULT_STEVE_FACE[y][x]);
+            }
+        }
+        return image;
     }
 
     private void drawEmptyState(Graphics2D graphics) {
