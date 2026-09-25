@@ -1,10 +1,16 @@
 package cn.huohuas001.huhobot.onlinelist.skin;
 
+import cn.huohuas001.huhobot.onlinelist.model.PlayerSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,5 +47,29 @@ final class AvatarCacheTest {
     @Test
     void detectsFullyTransparentHead() {
         assertFalse(AvatarCache.hasVisiblePixels(new BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)));
+    }
+
+    @Test
+    void rejectedDownloadTaskFallsBackWithoutBreakingTheWholeList() {
+        Executor rejectingExecutor = command -> {
+            throw new RejectedExecutionException("queue full");
+        };
+        AvatarCache cache = new AvatarCache(
+            Logger.getLogger("test"),
+            rejectingExecutor,
+            500,
+            500,
+            16,
+            true
+        );
+        PlayerSnapshot player = new PlayerSnapshot(
+            "QueueRejected",
+            "00000000-0000-0000-0000-000000000001",
+            "https://textures.minecraft.net/texture/unreachable"
+        );
+
+        Map<String, BufferedImage> result = cache.loadAll(Collections.singletonList(player));
+
+        assertTrue(result.isEmpty());
     }
 }

@@ -5,7 +5,6 @@ import cn.huohuas001.huhobot.onlinelist.api.ImageReplyRequest;
 import cn.huohuas001.huhobot.onlinelist.api.ImageReplyResult;
 import cn.huohuas001.huhobot.onlinelist.bridge.BotCommandContext;
 import cn.huohuas001.huhobot.onlinelist.bridge.BuiltInCommandBridge;
-import cn.huohuas001.huhobot.onlinelist.bridge.HuHoBotBridge;
 import cn.huohuas001.huhobot.onlinelist.image.ReflectiveImageReplyApi;
 import cn.huohuas001.huhobot.onlinelist.model.OnlineListPages;
 import cn.huohuas001.huhobot.onlinelist.model.PlayerSnapshot;
@@ -46,7 +45,6 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
     private final ConcurrentHashMap<String, Long> lastRequestAt = new ConcurrentHashMap<String, Long>();
     private ExecutorService renderExecutor;
     private ExecutorService skinExecutor;
-    private HuHoBotBridge bridge;
     private BuiltInCommandBridge builtInBridge;
     private BukkitTask registrationRetryTask;
     private ImageReplyApi imageReplyApi;
@@ -57,14 +55,6 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
         saveDefaultConfig();
         if (getCommand("huhobotonlinelist") != null) {
             getCommand("huhobotonlinelist").setExecutor(this);
-        }
-
-        String configuredCommand = getConfig().getString("bot-command", "在线列表");
-        String commandKey = configuredCommand == null ? "" : configuredCommand.trim();
-        if (commandKey.isEmpty()) {
-            getLogger().severe("config.yml 的 bot-command 不能为空");
-            getServer().getPluginManager().disablePlugin(this);
-            return;
         }
 
         renderExecutor = Executors.newSingleThreadExecutor(namedThreads("HuHoBotOnlineList-Render"));
@@ -80,6 +70,9 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
             boolean skinDebug = getConfig().getBoolean("skin.debug", false);
             skinResolver = new BukkitSkinResolver(getLogger(), skinDebug);
             SkinUrlResolver fallbackSkinResolver = connectSkinRestorer(skinDebug);
+            Path persistentAvatarCache = getConfig().getBoolean("skin.persistent-cache", true)
+                ? getDataFolder().toPath().resolve("cache").resolve("avatars")
+                : null;
             AvatarCache avatars = new AvatarCache(
                 getLogger(),
                 skinExecutor,
@@ -88,29 +81,54 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
                 getConfig().getInt("skin.cache-size", 200),
                 getConfig().getBoolean("skin.enabled", true),
                 fallbackSkinResolver,
-                skinDebug
+                skinDebug,
+                persistentAvatarCache
             );
-            renderer = new OnlineListRenderer(
-                avatars,
-                getConfig().getInt("render.columns", 3),
-                getConfig().getString("render.font-family", ""),
-                getConfig().getString("render.footer-text", "POWERED BY HuHoBot"),
-                getConfig().getString("skin.fallback-avatar", "steve")
-            );
+            Files.createDirectories(customBackgroundDirectory());
+            boolean customBackground = getConfig().getBoolean("render.custom-background.enabled", true);
+            Path background = customBackground ? customBackgroundPath() : null;
+            if (customBackground && Files.isRegularFile(background)) {
+                renderer = new OnlineListRenderer(
+                    avatars,
+                    getConfig().getInt("render.columns", 3),
+                    getConfig().getString("render.font-family", ""),
+                    getConfig().getString("render.footer-text", "POWERED BY HuHoBot"),
+                    getConfig().getString("skin.fallback-avatar", "steve"),
+                    background,
+                    getConfig().getString("render.custom-background.fit", "cover"),
+                    getConfig().getDouble("render.custom-background.surface-opacity", 0.12),
+                    getConfig().getBoolean("render.custom-background.adaptive-backdrop-dimming", true),
+                    getConfig().getDouble("render.custom-background.maximum-backdrop-dimming", 0.38)
+                );
+                getLogger().info("已启用自定义在线列表底图：" + background);
+            } else {
+                renderer = new OnlineListRenderer(
+                    avatars,
+                    getConfig().getInt("render.columns", 3),
+                    getConfig().getString("render.font-family", ""),
+                    getConfig().getString("render.footer-text", "POWERED BY HuHoBot"),
+                    getConfig().getString("skin.fallback-avatar", "steve")
+                );
+                if (customBackground) {
+                    getLogger().warning("未找到自定义底图 " + background + "，使用新版内置默认底图");
+                } else {
+                    getLogger().info("自定义底图已关闭，使用新版内置默认底图");
+                }
+            }
             imageReplyApi = new ReflectiveImageReplyApi(
                 huHoBot,
                 getLogger(),
                 getConfig().getInt("image-api.max-bytes", 20 * 1024 * 1024)
             );
             Bukkit.getServicesManager().register(ImageReplyApi.class, imageReplyApi, this, ServicePriority.Normal);
-            connectCommand(commandKey);
+            connectCommand();
         } catch (Throwable error) {
             getLogger().log(Level.SEVERE, "HuHoBot 在线列表初始化失败", error);
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
 
-        getLogger().info("在线列表已就绪，主题：雾蓝玻璃，图片回复：JAR 内置字节 API");
+        getLogger().info("在线列表已就绪，接入：HuHoBot Addon，平台：Bukkit/Spigot，图片回复：JAR 内置字节 API");
     }
 
     private SkinUrlResolver connectSkinRestorer(boolean debug) {
@@ -140,7 +158,6 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
     public void onDisable() {
         if (registrationRetryTask != null) registrationRetryTask.cancel();
         if (builtInBridge != null) builtInBridge.disconnect();
-        if (bridge != null) bridge.disconnect();
         Bukkit.getServicesManager().unregisterAll(this);
         shutdown(renderExecutor);
         shutdown(skinExecutor);
@@ -148,51 +165,29 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
         lastRequestAt.clear();
     }
 
-    private void connectCommand(String commandKey) throws ReflectiveOperationException {
-        if ("在线列表".equals(commandKey)) {
-            BuiltInCommandBridge.ConnectResult result = builtInBridge.tryConnect();
-            if (result == BuiltInCommandBridge.ConnectResult.CONNECTED) {
-                getLogger().info(builtInBridge.isAddonApiUsed()
-                    ? "已通过 PenguinAgent AddonAPI 注册 /在线列表"
-                    : "已通过 HuHoBot 原生命令入口注册 /在线列表");
-                return;
-            }
-            if (result == BuiltInCommandBridge.ConnectResult.NOT_READY) {
-                registrationRetryTask = getServer().getScheduler().runTaskTimer(this, () -> {
-                    BuiltInCommandBridge.ConnectResult retry = builtInBridge.tryConnect();
-                    if (retry == BuiltInCommandBridge.ConnectResult.CONNECTED) {
-                        getLogger().info(builtInBridge.isAddonApiUsed()
-                            ? "QQ 客户端启动完成，已通过 PenguinAgent AddonAPI 注册 /在线列表"
-                            : "QQ 客户端启动完成，已通过 HuHoBot 原生命令入口注册 /在线列表");
-                        registrationRetryTask.cancel();
-                        registrationRetryTask = null;
-                    } else if (retry == BuiltInCommandBridge.ConnectResult.UNSUPPORTED) {
-                        registrationRetryTask.cancel();
-                        registrationRetryTask = null;
-                        try {
-                            connectEventFallback(commandKey);
-                        } catch (ReflectiveOperationException error) {
-                            getLogger().log(Level.SEVERE, "HuHoBot 命令后备入口注册失败", error);
-                            getServer().getPluginManager().disablePlugin(this);
-                        }
-                    }
-                }, 20L, 20L);
-                getLogger().info("等待 HuHoBot QQ 客户端启动，随后自动注册 /在线列表");
-                return;
-            }
+    private void connectCommand() {
+        BuiltInCommandBridge.ConnectResult result = builtInBridge.tryConnect();
+        if (result == BuiltInCommandBridge.ConnectResult.CONNECTED) {
+            getLogger().info("已通过 HuHoBot Addon API 注册 /在线列表");
+            return;
         }
-        connectEventFallback(commandKey);
-    }
-
-    private void connectEventFallback(String commandKey) throws ReflectiveOperationException {
-        bridge = new HuHoBotBridge(
-            this,
-            commandKey,
-            getConfig().getBoolean("push-command-menu", true),
-            this::acceptBotCommand
-        );
-        bridge.connect();
-        getLogger().warning("当前 HuHoBot 分支不支持原生命令注册，已启用 OnBotCommand 兼容入口");
+        if (result == BuiltInCommandBridge.ConnectResult.UNSUPPORTED) {
+            throw new IllegalStateException("当前 HuHoBot 不提供新版 Addon API");
+        }
+        registrationRetryTask = getServer().getScheduler().runTaskTimer(this, () -> {
+            BuiltInCommandBridge.ConnectResult retry = builtInBridge.tryConnect();
+            if (retry == BuiltInCommandBridge.ConnectResult.CONNECTED) {
+                getLogger().info("QQ 客户端启动完成，已通过 HuHoBot Addon API 注册 /在线列表");
+                registrationRetryTask.cancel();
+                registrationRetryTask = null;
+            } else if (retry == BuiltInCommandBridge.ConnectResult.UNSUPPORTED) {
+                registrationRetryTask.cancel();
+                registrationRetryTask = null;
+                getLogger().severe("HuHoBot Addon API 不可用，OnlineList 将停用");
+                getServer().getPluginManager().disablePlugin(this);
+            }
+        }, 20L, 20L);
+        getLogger().info("等待 HuHoBot QQ 客户端启动，随后自动注册 /在线列表");
     }
 
     private void acceptBotCommand(BotCommandContext context) {
@@ -207,7 +202,7 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
         int requestedPage = parseRequestedPage(context.getCommandArguments());
         if (requestedPage < 1) {
             context.replyText(message("messages.page-usage", "用法：/{command} [页码]，页码必须是正整数。")
-                .replace("{command}", getConfig().getString("bot-command", "在线列表")));
+                .replace("{command}", "在线列表"));
             return;
         }
 
@@ -323,9 +318,38 @@ public final class OnlineListPlugin extends JavaPlugin implements CommandExecuto
             return generateTestPreview(sender, args);
         }
         sender.sendMessage("HuHoBotOnlineList " + getDescription().getVersion() + " 已启用；QQ 命令 /"
-            + getConfig().getString("bot-command", "在线列表")
+            + "在线列表"
             + " [页码]；本地测试：/" + label + " test <虚假玩家数> [页码] [名称模板]");
         return true;
+    }
+
+    private Path customBackgroundPath() throws IOException {
+        Path backgrounds = customBackgroundDirectory();
+        Files.createDirectories(backgrounds);
+        String configured = getConfig().getString(
+            "render.custom-background.file",
+            "online-list.png"
+        );
+        String fileName = configured == null ? "" : configured.trim();
+        if (!fileName.matches("[A-Za-z0-9._-]+\\.png")) {
+            throw new IllegalArgumentException(
+                "render.custom-background.file 必须是不含目录的 PNG 文件名"
+            );
+        }
+        Path resolved = backgrounds.resolve(fileName).normalize();
+        if (!resolved.startsWith(backgrounds)) {
+            throw new IllegalArgumentException("自定义底图不能离开 backgrounds 目录");
+        }
+        return resolved;
+    }
+
+    private Path customBackgroundDirectory() {
+        return getDataFolder().toPath()
+            .resolve("assets")
+            .resolve("custom")
+            .resolve("backgrounds")
+            .toAbsolutePath()
+            .normalize();
     }
 
     private boolean generateTestPreview(CommandSender sender, String[] args) {

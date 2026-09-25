@@ -1,18 +1,19 @@
 name: HuHoBotOnlineList
 version: '${version}'
 main: cn.huohuas001.huhobot.onlinelist.OnlineListPlugin
-description: 为 HuHoBot 生成 Minecraft 在线玩家列表图片
+description: 通过 HuHoBot Addon API 生成可自定义底图的 Minecraft 在线玩家列表图片
 authors:
   - RiegaLee
   - Shabby-666
 api-version: '1.16'
 load: POSTWORLD
-softdepend:
+depend:
   - HuHoBotPenguin
+softdepend:
   - SkinsRestorer
 commands:
   huhobotonlinelist:
-    description: HuHoBot 在线列表附属插件内部桥接命令
+    description: 生成在线列表本地测试预览或查看插件状态
     usage: /huhobotonlinelist [test <0-300> [页码] [名称模板]]
 permissions:
   huhobotonlinelist.admin:

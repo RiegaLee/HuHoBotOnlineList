@@ -1,7 +1,3 @@
-# QQ 群中注册的命令。这里不需要写前导斜杠。
-bot-command: "在线列表"
-push-command-menu: true
-
 # 图片左上角显示的服务器名称；默认不重复使用 HuHoBot 品牌名。
 server-name: "MinecraftServer"
 
@@ -24,10 +20,24 @@ sorting:
   admin-permission: "huhobotonlinelist.priority"
 
 render:
-  # 雾蓝主题默认使用三列紧凑玩家卡片。
+  # 新版透明材质主题默认使用三列紧凑玩家卡片。
   columns: 3
   font-family: ""
   footer-text: "POWERED BY HuHoBot"
+  # 可选的用户底图。PNG 放入：
+  # plugins/HuHoBotOnlineList/assets/custom/backgrounds/
+  # 新版透明材质 UI 始终启用；这里仅控制是否尝试加载外部 PNG。
+  # 文件不存在时会安全回退到新版内置默认底图，不会再显示旧版机器人主题。
+  custom-background:
+    enabled: true
+    file: online-list.png
+    # cover 保持比例并居中裁切；stretch 拉伸到完整动态画布。
+    fit: cover
+    # 浅烟灰卡片的透明度。推荐 0.08-0.16；数值越低，底图透出越明显。
+    surface-opacity: 0.12
+    # 仅在底图过亮、白字难以辨认时，自适应轻度压暗整张底图；不会加深卡片。
+    adaptive-backdrop-dimming: true
+    maximum-backdrop-dimming: 0.38
 
 test:
   # 大于 0 时，QQ群 /在线列表 会改用指定数量的虚假玩家，可测试完整 QQ 发图链路。
@@ -42,6 +52,8 @@ skin:
   enabled: true
   # 开启后会在控制台记录头像来自 Bukkit、SkinsRestorer、历史缓存还是 Steve 兜底。
   debug: false
+  # 保存每名玩家最后一次成功头像，Profile 临时不可用或重启后仍可继续显示。
+  persistent-cache: true
   # steve：使用 JAR 内置的 Steve 正脸；initial：使用旧版彩色首字母头像。
   fallback-avatar: "steve"
   connect-timeout-ms: 3000

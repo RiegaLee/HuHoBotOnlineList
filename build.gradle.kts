@@ -1,9 +1,19 @@
+import java.util.zip.ZipFile
+
 plugins {
     java
 }
 
-group = "cn.huohuas001.huhobot"
-version = "1.0.1"
+group = "cn.huohuas001.huhobot.addons"
+version = "1.22.0"
+
+val huhobotQqSdkJar = providers.gradleProperty("huhobotQqSdkJar")
+    .orElse(providers.environmentVariable("HUHOBOT_QQ_SDK_JAR"))
+    .orNull
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?.let(::file)
+    ?: file("../PenguinClient-Main/common/Bot/build/libs/common-Bot-1.5.0.jar")
 
 repositories {
     mavenCentral()
@@ -11,10 +21,14 @@ repositories {
 }
 
 dependencies {
+    compileOnly(files(huhobotQqSdkJar))
+    compileOnly("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     compileOnly("org.spigotmc:spigot-api:1.16.5-R0.1-SNAPSHOT")
 
     testImplementation(platform("org.junit:junit-bom:5.13.4"))
+    testImplementation(files(huhobotQqSdkJar))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -39,13 +53,49 @@ tasks.processResources {
 }
 
 tasks.jar {
-    archiveBaseName.set("HuHoBotOnlineList")
-    // These two source-only ABI stubs let javac build the optional native command adapter.
-    // Runtime always uses the real classes from HuHoBot; never package the stubs.
-    exclude("cn/huohuas001/bot/**")
+    archiveFileName.set("HuHoBot-OnlineList-${project.version}.jar")
 }
 
 tasks.test {
     useJUnitPlatform()
+    include("**/*Test.class")
     systemProperty("java.awt.headless", "true")
+}
+
+val verifyAddonJar by tasks.registering {
+    group = "verification"
+    description = "Checks the Spigot-safe addon boundary and required resources."
+    dependsOn(tasks.jar)
+
+    doLast {
+        check(huhobotQqSdkJar.isFile) {
+            "Build PenguinClient-Main/common/Bot first; expected ${huhobotQqSdkJar.absolutePath}"
+        }
+        ZipFile(tasks.jar.get().archiveFile.get().asFile).use { zip ->
+            val entries = zip.entries().asSequence().map { it.name }.toList()
+            listOf(
+                "plugin.yml",
+                "config.yml",
+                "fonts/HuHoBotOnlineTitle-Semibold.ttf"
+            ).forEach { required ->
+                check(required in entries) { "Addon JAR is missing $required" }
+            }
+            check(entries.none { it.startsWith("online/huhobot-glass-") }) {
+                "Legacy robot-theme image resources must not remain in the rebuilt addon"
+            }
+            check(entries.none {
+                it.startsWith("cn/huohuas001/bot/") ||
+                    it.startsWith("io/github/kloping/") ||
+                    it.startsWith("org/bukkit/") ||
+                    it.startsWith("io/papermc/") ||
+                    it.startsWith("net/minecraft/")
+            }) {
+                "Addon JAR must not bundle HuHoBot, QQ SDK, Bukkit, Paper, or NMS classes"
+            }
+        }
+    }
+}
+
+tasks.build {
+    dependsOn(verifyAddonJar)
 }

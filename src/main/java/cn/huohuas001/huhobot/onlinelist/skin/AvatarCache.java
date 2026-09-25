@@ -11,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -33,6 +35,7 @@ public final class AvatarCache {
     private final boolean enabled;
     private final SkinUrlResolver fallbackSkinResolver;
     private final boolean debug;
+    private final PersistentAvatarStore persistentStore;
     private final Map<String, BufferedImage> cacheByUrl;
     private final Map<String, BufferedImage> lastSuccessfulByPlayer;
 
@@ -44,7 +47,7 @@ public final class AvatarCache {
         int maxEntries,
         boolean enabled
     ) {
-        this(logger, downloadExecutor, connectTimeoutMs, readTimeoutMs, maxEntries, enabled, null, false);
+        this(logger, downloadExecutor, connectTimeoutMs, readTimeoutMs, maxEntries, enabled, null, false, null);
     }
 
     public AvatarCache(
@@ -57,6 +60,30 @@ public final class AvatarCache {
         SkinUrlResolver fallbackSkinResolver,
         boolean debug
     ) {
+        this(
+            logger,
+            downloadExecutor,
+            connectTimeoutMs,
+            readTimeoutMs,
+            maxEntries,
+            enabled,
+            fallbackSkinResolver,
+            debug,
+            null
+        );
+    }
+
+    public AvatarCache(
+        Logger logger,
+        Executor downloadExecutor,
+        int connectTimeoutMs,
+        int readTimeoutMs,
+        int maxEntries,
+        boolean enabled,
+        SkinUrlResolver fallbackSkinResolver,
+        boolean debug,
+        Path persistentCacheDirectory
+    ) {
         this.logger = logger;
         this.downloadExecutor = downloadExecutor;
         this.connectTimeoutMs = Math.max(250, connectTimeoutMs);
@@ -64,6 +91,7 @@ public final class AvatarCache {
         this.enabled = enabled;
         this.fallbackSkinResolver = fallbackSkinResolver;
         this.debug = debug;
+        this.persistentStore = new PersistentAvatarStore(persistentCacheDirectory, logger);
         final int capacity = Math.max(8, maxEntries);
         this.cacheByUrl = lruCache(capacity);
         this.lastSuccessfulByPlayer = lruCache(capacity);
@@ -85,10 +113,16 @@ public final class AvatarCache {
             if (player.getAvatarOverride() != null) {
                 result.put(player.getUuid(), player.getAvatarOverride());
             } else if (enabled) {
-                futures.add(CompletableFuture.supplyAsync(() ->
-                    new java.util.AbstractMap.SimpleImmutableEntry<String, BufferedImage>(player.getUuid(), load(player)),
-                    downloadExecutor
-                ));
+                try {
+                    futures.add(CompletableFuture.supplyAsync(() ->
+                        new java.util.AbstractMap.SimpleImmutableEntry<String, BufferedImage>(player.getUuid(), load(player)),
+                        downloadExecutor
+                    ));
+                } catch (RejectedExecutionException rejected) {
+                    BufferedImage previous = loadRemembered(player);
+                    if (previous != null) result.put(player.getUuid(), previous);
+                    logger.fine("皮肤下载队列已满，玩家 " + player.getName() + " 将使用缓存或后备头像");
+                }
             }
         }
         for (CompletableFuture<Map.Entry<String, BufferedImage>> future : futures) {
@@ -123,6 +157,12 @@ public final class AvatarCache {
         if (previous != null) {
             trace(player, "本次皮肤不可用，沿用该玩家最后一次成功头像");
             return previous;
+        }
+        BufferedImage persisted = persistentStore.load(player.getUuid());
+        if (persisted != null) {
+            lastSuccessfulByPlayer.put(player.getUuid(), persisted);
+            trace(player, "本次皮肤不可用，沿用磁盘中的最后一次成功头像");
+            return persisted;
         }
         trace(player, "没有可用皮肤，使用内置 Steve 头像");
         return null;
@@ -169,6 +209,15 @@ public final class AvatarCache {
 
     private void remember(PlayerSnapshot player, BufferedImage avatar) {
         lastSuccessfulByPlayer.put(player.getUuid(), avatar);
+        persistentStore.save(player.getUuid(), avatar);
+    }
+
+    private BufferedImage loadRemembered(PlayerSnapshot player) {
+        BufferedImage memory = lastSuccessfulByPlayer.get(player.getUuid());
+        if (memory != null) return memory;
+        BufferedImage disk = persistentStore.load(player.getUuid());
+        if (disk != null) lastSuccessfulByPlayer.put(player.getUuid(), disk);
+        return disk;
     }
 
     private void trace(PlayerSnapshot player, String message) {

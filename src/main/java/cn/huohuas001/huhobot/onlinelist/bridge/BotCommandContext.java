@@ -2,50 +2,26 @@ package cn.huohuas001.huhobot.onlinelist.bridge;
 
 import cn.huohuas001.huhobot.onlinelist.util.Reflect;
 
-/** 从 HuHoBot Bukkit 事件提取的稳定命令上下文。 */
+/** 从 HuHoBot 原生群消息对象提取出的稳定命令上下文。 */
 public final class BotCommandContext {
     private final Object sourceEvent;
-    private final String commandKey;
     private final String commandArguments;
     private final String groupOpenId;
     private final String messageId;
     private final int messageSequence;
-    private final boolean cancellable;
 
     private BotCommandContext(
         Object sourceEvent,
-        String commandKey,
         String commandArguments,
         String groupOpenId,
         String messageId,
-        int messageSequence,
-        boolean cancellable
+        int messageSequence
     ) {
         this.sourceEvent = sourceEvent;
-        this.commandKey = commandKey;
         this.commandArguments = commandArguments;
         this.groupOpenId = groupOpenId;
         this.messageId = messageId;
         this.messageSequence = messageSequence;
-        this.cancellable = cancellable;
-    }
-
-    public static BotCommandContext from(Object event) throws ReflectiveOperationException {
-        Object message;
-        try {
-            message = Reflect.read(event, "message");
-        } catch (ReflectiveOperationException ignored) {
-            message = Reflect.read(event, "msgPack");
-        }
-        return new BotCommandContext(
-            event,
-            text(Reflect.read(message, "commandKey")),
-            optionalText(message, "commandArguments"),
-            text(Reflect.read(message, "groupOpenId")),
-            text(Reflect.read(message, "messageId")),
-            number(Reflect.read(message, "messageSequence")),
-            true
-        );
     }
 
     public static BotCommandContext fromRawEvent(Object event) throws ReflectiveOperationException {
@@ -73,22 +49,11 @@ public final class BotCommandContext {
         }
         return new BotCommandContext(
             event,
-            "在线列表",
             commandArguments == null ? "" : commandArguments.trim(),
             groupOpenId,
             text(Reflect.read(rawMessage, "id")),
-            sequence,
-            false
+            sequence
         );
-    }
-
-    public void cancel() {
-        if (!cancellable) return;
-        try {
-            Reflect.invoke(sourceEvent, "setCancelled", true);
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException("HuHoBot OnBotCommand cannot be cancelled", error);
-        }
     }
 
     public boolean replyText(String text) {
@@ -112,10 +77,6 @@ public final class BotCommandContext {
 
     public Object getSourceEvent() {
         return sourceEvent;
-    }
-
-    public String getCommandKey() {
-        return commandKey;
     }
 
     public String getCommandArguments() {

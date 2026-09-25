@@ -1,5 +1,7 @@
 package cn.huohuas001.huhobot.onlinelist.bridge;
 
+import cn.huohuas001.bot.QClient;
+import cn.huohuas001.bot.addon.Addon;
 import cn.huohuas001.huhobot.onlinelist.util.Reflect;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
@@ -23,8 +25,6 @@ public final class BuiltInCommandBridge {
     private final Consumer<BotCommandContext> handler;
     private final Plugin huHoBot;
     private Object commandInstance;
-    private Class<?> qClientClass;
-    private boolean addonApiUsed;
 
     public BuiltInCommandBridge(JavaPlugin owner, Consumer<BotCommandContext> handler) {
         this.owner = owner;
@@ -36,29 +36,14 @@ public final class BuiltInCommandBridge {
         if (commandInstance != null) return ConnectResult.CONNECTED;
         if (huHoBot == null || !huHoBot.isEnabled()) return ConnectResult.UNSUPPORTED;
         try {
-            ClassLoader loader = huHoBot.getClass().getClassLoader();
-            qClientClass = Class.forName("cn.huohuas001.bot.QClient", false, loader);
-            Object qClient = Reflect.kotlinObject(qClientClass);
             Object candidate = new BuiltInOnlineListCommand(this::onRawEvent);
-            addonApiUsed = AddonCommandRegistrar.tryRegister(
-                loader,
-                qClient,
-                candidate,
+            Addon addon = new Addon(
                 owner.getName(),
                 owner.getDescription().getVersion(),
                 owner.getDescription().getDescription() == null ? "" : owner.getDescription().getDescription(),
                 String.join(", ", owner.getDescription().getAuthors())
             );
-            if (addonApiUsed) {
-                // PenguinAgent 的 Addon 重载不会主动刷新已经启动的 QQ 指令面板。
-                try {
-                    Reflect.invoke(qClient, "syncGroupPanels");
-                } catch (Throwable error) {
-                    owner.getLogger().fine("HuHoBot Addon 指令面板刷新失败：" + concise(error));
-                }
-            } else {
-                Reflect.invoke(qClient, "registerCommand", candidate);
-            }
+            QClient.INSTANCE.registerCommand(addon, (BuiltInOnlineListCommand) candidate);
             commandInstance = candidate;
             return ConnectResult.CONNECTED;
         } catch (Throwable error) {
@@ -69,23 +54,17 @@ public final class BuiltInCommandBridge {
     }
 
     public void disconnect() {
-        if (qClientClass == null || commandInstance == null) return;
+        if (commandInstance == null) return;
         try {
-            Object handlerObject = readKotlinField(qClientClass, "groupMessageHandler");
+            Object handlerObject = readKotlinField(QClient.class, "groupMessageHandler");
             Object commands = Reflect.read(handlerObject, "commands");
             if (commands instanceof List) ((List<?>) commands).remove(commandInstance);
-            Object qClient = Reflect.kotlinObject(qClientClass);
-            Reflect.invoke(qClient, "syncGroupPanels");
+            QClient.INSTANCE.syncGroupPanels();
         } catch (Throwable error) {
             owner.getLogger().warning("注销 HuHoBot 原生命令失败：" + concise(error));
         } finally {
             commandInstance = null;
-            addonApiUsed = false;
         }
-    }
-
-    public boolean isAddonApiUsed() {
-        return addonApiUsed;
     }
 
     public Plugin getHuHoBotPlugin() {
@@ -103,9 +82,9 @@ public final class BuiltInCommandBridge {
         }
     }
 
-    private void onRawEvent(Object event) {
+    private void onRawEvent(Object event, String arguments) {
         try {
-            handler.accept(BotCommandContext.fromRawEvent(event));
+            handler.accept(BotCommandContext.fromRawEvent(event, arguments));
         } catch (Throwable error) {
             owner.getLogger().warning("读取 HuHoBot 原生群消息失败：" + concise(error));
         }

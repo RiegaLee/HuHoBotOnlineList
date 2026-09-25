@@ -1,6 +1,8 @@
 .gradle/
 build/
 out/
-*.log
-*.iml
 .idea/
+*.iml
+
+# Runtime files belong to the server installation, never the source tree.
+plugins/

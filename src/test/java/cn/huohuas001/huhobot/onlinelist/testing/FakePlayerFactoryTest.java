@@ -19,6 +19,8 @@ class FakePlayerFactoryTest {
         assertTrue(snapshot.getServerName().contains("测试名单"));
         assertEquals("TestPlayer001", snapshot.getPlayers().get(0).getName());
         assertNotNull(snapshot.getPlayers().get(0).getAvatarOverride());
+        assertEquals(8, snapshot.getPlayers().get(0).getAvatarOverride().getWidth());
+        assertEquals(0xFF523D89, snapshot.getPlayers().get(0).getAvatarOverride().getRGB(2, 4));
     }
 
     @Test
