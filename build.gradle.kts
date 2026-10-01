@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "cn.huohuas001.huhobot.addons"
-version = "1.22.0"
+version = "1.22.1"
 
 val huhobotQqSdkJar = providers.gradleProperty("huhobotQqSdkJar")
     .orElse(providers.environmentVariable("HUHOBOT_QQ_SDK_JAR"))
