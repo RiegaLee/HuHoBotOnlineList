@@ -50,6 +50,20 @@ class OnlineListRendererTest {
     }
 
     @Test
+    void createsDefaultBackgroundPreviewWithNinePlayers() throws Exception {
+        byte[] png = renderer().render(snapshot(9));
+        Path output = Paths.get("build", "preview", "default-online-list-9-players.png");
+        Files.createDirectories(output.getParent());
+        Files.write(output, png);
+
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(png));
+        assertNotNull(image);
+        assertEquals(1200, image.getWidth());
+        assertEquals(900, image.getHeight());
+        assertTrue(Files.size(output) > 50_000);
+    }
+
+    @Test
     void playerListGrowsExactlyWithTheTransparentRoster() throws Exception {
         OnlineListRenderer renderer = renderer();
         for (int players : new int[]{1, 6, 7, 20, 48}) {

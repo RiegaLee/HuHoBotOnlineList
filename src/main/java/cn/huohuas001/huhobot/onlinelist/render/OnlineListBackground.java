@@ -4,6 +4,7 @@ import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
+import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
@@ -88,25 +89,31 @@ final class OnlineListBackground {
             graphics.setPaint(new GradientPaint(
                 0,
                 0,
-                new Color(22, 31, 47),
+                new Color(35, 72, 111),
                 1200,
                 900,
-                new Color(48, 68, 91)
+                new Color(83, 145, 185)
             ));
             graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
-            graphics.setPaint(new GradientPaint(
-                0,
-                220,
-                new Color(93, 123, 154, 100),
-                0,
-                760,
-                new Color(20, 27, 40, 12)
-            ));
-            graphics.fillOval(180, 110, 840, 720);
+            paintGlow(graphics, 600, 510, 690, new Color(151, 204, 229, 115));
+            paintGlow(graphics, 180, 760, 290, new Color(43, 139, 197, 85));
+            paintGlow(graphics, 1010, 110, 200, new Color(87, 185, 227, 90));
+            paintGlow(graphics, 490, 35, 160, new Color(91, 188, 226, 75));
         } finally {
             graphics.dispose();
         }
         return new OnlineListBackground(image, "cover", true, 0.38);
+    }
+
+    private static void paintGlow(Graphics2D graphics, int x, int y, int radius, Color center) {
+        graphics.setPaint(new RadialGradientPaint(
+            x,
+            y,
+            radius,
+            new float[]{0f, 1f},
+            new Color[]{center, new Color(center.getRed(), center.getGreen(), center.getBlue(), 0)}
+        ));
+        graphics.fillRect(0, 0, 1200, 900);
     }
 
     void paint(Graphics2D graphics, int width, int height, int footerTop) {
